@@ -11,7 +11,7 @@ import pandas as pd
 from scipy import spatial
 import matplotlib.pyplot as plt
 
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 def initialize_vars(sess):
     sess.run(tf.local_variables_initializer())
@@ -36,8 +36,7 @@ def custom_acc_orig_tokens(y_true, y_pred):
     mask = (y_label < 6)
     y_label_masked = tf.boolean_mask(y_label, mask)
     
-    y_predicted = tf.math.argmax(input = tf.reshape(tf.layers.Flatten()(tf.cast(y_pred, tf.float64)),\
-                                                    [-1, 10]), axis=1)
+    y_predicted = tf.math.argmax(input = tf.reshape(tf.layers.Flatten()(tf.cast(y_pred, tf.float64)), [-1, 10]), axis=1)
     
     y_predicted_masked = tf.boolean_mask(y_predicted, mask)
 
@@ -62,6 +61,29 @@ def custom_acc_orig_non_other_tokens(y_true, y_pred):
     
     y_predicted = tf.math.argmax(input = tf.reshape(tf.layers.Flatten()(tf.cast(y_pred, tf.float64)),\
                                                     [-1, 10]), axis=1)
+    
+    y_predicted_masked = tf.boolean_mask(y_predicted, mask)
+
+    return tf.reduce_mean(tf.cast(tf.equal(y_predicted_masked,y_label_masked) , dtype=tf.float64))
+
+def custom_acc_protected(y_true, y_pred):
+    """
+    calculate loss dfunction filtering out also the newly inserted labels
+    
+    y_true: Shape: (batch x (max_length) )
+    y_pred: predictions. Shape: (batch x x (max_length + 1) x num_distinct_ner_tokens ) 
+    
+    returns: accuracy
+    """
+
+    #get labels and predictions
+    
+    y_label = tf.reshape(tf.layers.Flatten()(tf.cast(y_true, tf.int64)),[-1])
+    
+    mask = (y_label < 2)
+    y_label_masked = tf.boolean_mask(y_label, mask)
+    
+    y_predicted = tf.math.argmax(input = tf.reshape(tf.layers.Flatten()(tf.cast(y_pred, tf.float64)), [-1, 6]), axis=1)
     
     y_predicted_masked = tf.boolean_mask(y_predicted, mask)
 
@@ -200,92 +222,181 @@ class BertLayer(tf.keras.layers.Layer):
 
         return result
 
+    
     def compute_output_shape(self, input_shape):
-        return (input_shape[0], self.output_size)
+        return (None, 128, 768)
+
 
 class NER():
 
-    def __init__(self, filename=None):
+    def __init__(self, max_input_length, filename=None):
+
+        self.max_input_length = max_input_length
+
         if filename:
             filename = "../models/"+filename
             self.model = tf.keras.load(filename)
 
-    def generate(self, max_input_length, train_layers, optimizer, debias, debiasWeight=0.5):
+    def generate(self, bert_train_layers):
     
-        in_id = tf.keras.layers.Input(shape=(max_input_length,), name="input_ids")
-        in_mask = tf.keras.layers.Input(shape=(max_input_length,), name="input_masks")
-        in_segment = tf.keras.layers.Input(shape=(max_input_length,), name="segment_ids")
-        
-        bert_inputs = [in_id, in_mask, in_segment]
-        
-        bert_sequence = BertLayer(n_fine_tune_layers=train_layers)(bert_inputs)
-            
-        dense = tf.keras.layers.Dense(256, activation='relu', name='dense')(bert_sequence)
-        
+        in_id = tf.keras.layers.Input(shape=(self.max_input_length,), name="input_ids")
+        in_mask = tf.keras.layers.Input(shape=(self.max_input_length,), name="input_masks")
+        in_segment = tf.keras.layers.Input(shape=(self.max_input_length,), name="segment_ids")
+        in_nerLabels = tf.keras.layers.Input(shape=(self.max_input_length, 10), name="ner_labels_true")
+
+        bert_sequence = BertLayer(n_fine_tune_layers=bert_train_layers)([in_id, in_mask, in_segment])
+
+        dense = tf.keras.layers.Dense(256, activation='relu', name='pred_dense')(bert_sequence)
+
         dense = tf.keras.layers.Dropout(rate=0.1)(dense)
-        
+
         pred = tf.keras.layers.Dense(10, activation='softmax', name='ner')(dense)
+
+        reshape = tf.keras.layers.Reshape((self.max_input_length, 10))(pred)
+
+        concatenate = tf.keras.layers.Concatenate(axis=-1)([in_nerLabels, reshape])
         
-        if(debias):
+        genderPred = tf.keras.layers.Dense(6, activation='softmax', name='gender')(concatenate)
 
-            genderPred = tf.keras.layers.Dense(6, activation='softmax', name='gender')(pred)
-
-            racePred = tf.keras.layers.Dense(6, activation='softmax', name='race')(pred)
-
-            losses = {
-                "ner": custom_loss,
-                "race": custom_loss_protected,
-                "gender": custom_loss_protected
-            }
-
-            lossWeights = {
-                "ner": 1.0-debiasWeight,
-                "race": debiasWeight/2.0,
-                "gender": debiasWeight/2.0
-            }
-
-            self.model = tf.keras.models.Model(inputs=bert_inputs, outputs={
-                "ner": pred,
-                "race": racePred,
-                "gender": genderPred
-            })
-
-            self.model.compile(
-                loss=losses,
-                loss_weights=lossWeights,
-                optimizer=optimizer, 
-                metrics={"ner": [custom_acc_orig_tokens,custom_acc_orig_non_other_tokens]})
-
-        else:
-            
-            self.model = tf.keras.models.Model(inputs=bert_inputs, outputs=pred)
-
-            self.model.compile(loss=custom_loss, optimizer=optimizer, metrics=[custom_acc_orig_tokens, 
-                                                                custom_acc_orig_non_other_tokens])
-            
+        racePred = tf.keras.layers.Dense(6, activation='softmax', name='race')(concatenate)
+        
+        self.model = tf.keras.models.Model(inputs=[in_id, in_mask, in_segment, in_nerLabels], outputs={
+            "ner": pred,
+            "race": racePred,
+            "gender": genderPred
+        })
+        
         self.model.summary()
         
-    def fit(self, train_data, val_data, epochs, batch_size):
+    def fit(self, sess, train_data, val_data, epochs, batch_size, debias, 
+    gender_loss_weight = 0.1, race_loss_weight = 0.1, pred_learning_rate =  2**-16, protect_learning_rate = 2**-16):
 
-        self.model.fit(
-            train_data["inputs"], 
-            {
-                "ner": train_data["nerLabels"],
-                "gender": train_data["genderLabels"],
-                "race": train_data["raceLabels"]
-            },
-            validation_data=(val_data["inputs"], {
-                "ner": val_data["nerLabels"],
-                "gender": val_data["genderLabels"],
-                "race": val_data["raceLabels"]
-            }),
-            epochs=epochs,
-            batch_size=batch_size
-        )
+        num_train_samples = len(train_data["nerLabels"])
+
+        ids_ph = tf.placeholder(tf.float32, shape=[batch_size, self.max_input_length])
+        masks_ph = tf.placeholder(tf.float32, shape=[batch_size, self.max_input_length])
+        sentenceIds_ph = tf.placeholder(tf.float32, shape=[batch_size, self.max_input_length])
+
+        ner_ph = tf.placeholder(tf.float32, shape=[batch_size, self.max_input_length])
+        gender_ph = tf.placeholder(tf.float32, shape=[batch_size, self.max_input_length])
+        race_ph = tf.placeholder(tf.float32, shape=[batch_size, self.max_input_length])
+        ner_onehot_ph = tf.placeholder(tf.float32, shape=[batch_size, self.max_input_length, 10])
+
+        global_step = tf.Variable(0, trainable=False)
+        starter_learning_rate = 0.001
+        learning_rate = tf.train.exponential_decay(starter_learning_rate, global_step, 1000, 0.96, staircase=True)
+
+        gender_vars = [var for var in tf.trainable_variables() if 'gender' in var.name]
+        race_vars = [var for var in tf.trainable_variables() if 'race' in var.name]
+        ner_vars = self.model.layers[3]._trainable_weights + [var for var in tf.trainable_variables() if any(x in var.name for x in ["pred_dense","ner"])]
+
+        y_pred = self.model([ids_ph, masks_ph, sentenceIds_ph, ner_onehot_ph], training=True)
+
+        ner_loss = custom_loss(ner_ph, y_pred["ner"])
+        gender_loss = custom_loss_protected(gender_ph, y_pred["gender"])
+        race_loss = custom_loss_protected(race_ph, y_pred["race"])
+
+        ner_opt = tf.train.AdamOptimizer(pred_learning_rate)
+        gender_opt = tf.train.AdamOptimizer(protect_learning_rate)
+        race_opt = tf.train.AdamOptimizer(protect_learning_rate)
+
+        gender_grads = {var: grad for (grad, var) in ner_opt.compute_gradients(
+            gender_loss,
+            var_list=ner_vars
+        )}
+
+        race_grads = {var: grad for (grad, var) in ner_opt.compute_gradients(
+            race_loss,
+            var_list=ner_vars
+        )}
+
+        ner_grads = []
+
+        tf_normalize = lambda x: x / (tf.norm(x) + np.finfo(np.float32).tiny)
+
+        for (grad, var) in ner_opt.compute_gradients(ner_loss, var_list=ner_vars):
+
+            if debias:
+
+                gender_unit_protect = tf_normalize(gender_grads[var])
+                race_unit_protect = tf_normalize(race_grads[var])
+
+                grad -= tf.reduce_sum(grad * gender_unit_protect) * gender_unit_protect
+                grad -= tf.math.scalar_mul(gender_loss_weight, gender_grads[var])
+
+                grad -= tf.reduce_sum(grad * race_unit_protect) * race_unit_protect
+                grad -= tf.math.scalar_mul(race_loss_weight, race_grads[var])
+
+            ner_grads.append((grad, var))
+
+        ner_min = ner_opt.apply_gradients(ner_grads, global_step=global_step)
+
+        gender_min = gender_opt.minimize(gender_loss, var_list=[gender_vars], global_step=global_step)
+
+        race_min = race_opt.minimize(race_loss, var_list=[race_vars], global_step=global_step)
+
+        initialize_vars(sess)
+
+        epoch_pb = tqdm(range(1, epochs+1))
+
+        for epoch in epoch_pb:
+
+            epoch_pb.set_description("Epoch %s" % epoch)
+
+            shuffled_ids = np.random.choice(num_train_samples, num_train_samples)
+
+            run_pb = tqdm(range(num_train_samples//batch_size))
+
+            for i in run_pb:
+
+                batch_ids = shuffled_ids[batch_size*i: batch_size*(i+1)]
+
+                batch_feed_dict = {ids_ph: train_data["inputs"][0][batch_ids], 
+                                masks_ph: train_data["inputs"][1][batch_ids],
+                                sentenceIds_ph: train_data["inputs"][2][batch_ids],
+                                ner_onehot_ph: np.array([np.eye(10)[i.reshape(-1)] for i in train_data["nerLabels"][batch_ids]]),
+                                gender_ph: train_data["genderLabels"][batch_ids],
+                                race_ph: train_data["raceLabels"][batch_ids],
+                                ner_ph: train_data["nerLabels"][batch_ids]}
+
+                _, _, _, ner_loss_value, gender_loss_value, race_loss_value  = sess.run([
+                    ner_min,
+                    gender_min,
+                    race_min,
+                    ner_loss,
+                    gender_loss,
+                    race_loss
+                ], feed_dict=batch_feed_dict)
+
+                run_pb.set_description("nl: %.2f; gl: %.2f;  rl: %.2f" % \
+                        (ner_loss_value, gender_loss_value, race_loss_value))
+
+            inputs = val_data["inputs"] 
+            
+            inputs.append(np.array([np.eye(10)[i.reshape(-1)] for i in train_data["nerLabels"]]))
+
+            val_y_pred = self.model.predict(inputs, batch_size=32)
+
+            ner_pred = val_y_pred[1]
+            ner_true = val_data["nerLabels"]
+
+            acc_orig_tokens = custom_acc_orig_tokens(ner_true, ner_pred).eval(session=sess)
+            acc_orig_non_other_tokens = custom_acc_orig_non_other_tokens(ner_true, ner_pred).eval(session=sess)
+
+            gender_pred = val_y_pred[0]
+            gender_true = val_data["genderLabels"]
+
+            acc_gender = custom_acc_protected(gender_true, gender_pred).eval(session=sess)
+
+            race_pred = val_y_pred[2]
+            race_true = val_data["raceLabels"]
+
+            acc_race = custom_acc_protected(race_true, race_pred).eval(session=sess)            
+            print("acc_ner: %.2f; acc_ner_non_other: %.2f;  acc_gender: %.2f; acc_race: %.2f" % (acc_orig_tokens, acc_orig_non_other_tokens, acc_gender, acc_race))
 
     def score(self, data, batch_size=32):
 
-        y_pred = self.model.predict(data["inputs"], batch_size=batch_size)
+        y_pred = self.model.predict(data["inputs"], batch_size=batch_size)[1]
 
         y_true = data["nerLabels"]
 
@@ -361,7 +472,7 @@ class NER():
 
         return np.array(distances)
 
-    def getBiasedPValues(self, data, num_iterations=1000):
+    def getBiasedPValues(self, data, num_iterations=10000):
 
         distances = self.getCosineDistances(data["inputs"], data["nameMasks"])
 
