@@ -71,15 +71,14 @@ class TokenizedSentence:
             nerTokens += addDict['nerToken']
 
             tokenLength = addDict['tokenLength']
+            
+            raceTokens += [sentence.race]*tokenLength
+            genderTokens += [sentence.gender]*tokenLength
 
-            if index == sentence.name_index:
-                raceTokens += [sentence.race]*tokenLength
-                genderTokens += [sentence.gender]*tokenLength
+            if index == sentence.name_index:                
                 nameMask += [1]*tokenLength
 
             else:
-                raceTokens += ["[raceX]"]*tokenLength
-                genderTokens += ["[genderX]"]*tokenLength
                 nameMask += [0]*tokenLength
 
         sentenceLength = min(max_length -1, len(sentenceTokens))
@@ -157,8 +156,6 @@ def getTokensAndLabelsFromSents(sents, max_length):
         raceTokens.append(tokenized_sent.raceTokens)
         genderTokens.append(tokenized_sent.genderTokens)
         nameMasks.append(tokenized_sent.nameMask)
-
-    numSentences = len(sents)
 
     nerLabels = getLabels(nerTokens)
     #posLabels = getLabels(posTokens)

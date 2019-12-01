@@ -246,19 +246,27 @@ class NER():
 
         bert_sequence = BertLayer(n_fine_tune_layers=bert_train_layers)([in_id, in_mask, in_segment])
 
-        dense = tf.keras.layers.Dense(256, activation='relu', name='pred_dense')(bert_sequence)
-
-        dense = tf.keras.layers.Dropout(rate=0.1)(dense)
-
-        pred = tf.keras.layers.Dense(10, activation='softmax', name='ner')(dense)
+        pred = tf.keras.layers.Dense(10, activation='softmax', name='ner')(bert_sequence)
 
         reshape = tf.keras.layers.Reshape((self.max_input_length, 10))(pred)
 
         concatenate = tf.keras.layers.Concatenate(axis=-1)([in_nerLabels, reshape])
-        
-        genderPred = tf.keras.layers.Dense(6, activation='softmax', name='gender')(concatenate)
 
-        racePred = tf.keras.layers.Dense(6, activation='softmax', name='race')(concatenate)
+        genderDense1 = tf.keras.layers.Dense(60, activation='relu', name='genderDense1')(concatenate)
+        genderDense1 = tf.keras.layers.Dropout(rate=0.1)(genderDense1)
+
+        genderDense2 = tf.keras.layers.Dense(60, activation='relu', name='genderDense2')(genderDense1)
+        genderDense2 = tf.keras.layers.Dropout(rate=0.1)(genderDense2)
+
+        genderPred = tf.keras.layers.Dense(6, activation='softmax', name='genderPred')(genderDense2)
+
+        raceDense1 = tf.keras.layers.Dense(60, activation='relu', name='raceDense1')(concatenate)
+        raceDense1 = tf.keras.layers.Dropout(rate=0.1)(raceDense1)
+
+        raceDense2 = tf.keras.layers.Dense(60, activation='relu', name='raceDense2')(raceDense1)
+        raceDense2 = tf.keras.layers.Dropout(rate=0.1)(raceDense2)
+
+        racePred = tf.keras.layers.Dense(6, activation='softmax', name='racePred')(raceDense2)
         
         self.model = tf.keras.models.Model(inputs=[in_id, in_mask, in_segment, in_nerLabels], outputs={
             "ner": pred,
@@ -268,8 +276,7 @@ class NER():
         
         self.model.summary()
         
-    def fit(self, sess, train_data, val_data, epochs, batch_size, debias, 
-    gender_loss_weight = 0.1, race_loss_weight = 0.1, pred_learning_rate =  2**-16, protect_learning_rate = 2**-16):
+    def fit(self, sess, train_data, val_data, epochs, batch_size, debias):
 
         num_train_samples = len(train_data["nerLabels"])
 
@@ -282,13 +289,15 @@ class NER():
         race_ph = tf.placeholder(tf.float32, shape=[batch_size, self.max_input_length])
         ner_onehot_ph = tf.placeholder(tf.float32, shape=[batch_size, self.max_input_length, 10])
 
+        # Setup optimizers with learning rates
         global_step = tf.Variable(0, trainable=False)
-        starter_learning_rate = 0.001
-        learning_rate = tf.train.exponential_decay(starter_learning_rate, global_step, 1000, 0.96, staircase=True)
+        #starter_learning_rate = 0.001
+        #learning_rate = tf.train.exponential_decay(starter_learning_rate, global_step,
+        #                                            1000, 0.96, staircase=True)
 
         gender_vars = [var for var in tf.trainable_variables() if 'gender' in var.name]
         race_vars = [var for var in tf.trainable_variables() if 'race' in var.name]
-        ner_vars = self.model.layers[3]._trainable_weights + [var for var in tf.trainable_variables() if any(x in var.name for x in ["pred_dense","ner"])]
+        ner_vars = self.model.layers[3]._trainable_weights + [var for var in tf.trainable_variables() if "ner" in var.name]
 
         y_pred = self.model([ids_ph, masks_ph, sentenceIds_ph, ner_onehot_ph], training=True)
 
@@ -296,9 +305,11 @@ class NER():
         gender_loss = custom_loss_protected(gender_ph, y_pred["gender"])
         race_loss = custom_loss_protected(race_ph, y_pred["race"])
 
-        ner_opt = tf.train.AdamOptimizer(pred_learning_rate)
-        gender_opt = tf.train.AdamOptimizer(protect_learning_rate)
-        race_opt = tf.train.AdamOptimizer(protect_learning_rate)
+        ner_opt = tf.train.AdamOptimizer(2**-16)
+        gender_opt = tf.train.AdamOptimizer(2**-8)
+        race_opt = tf.train.AdamOptimizer(2**-8)
+
+        protected_loss_weight = 0.1
 
         gender_grads = {var: grad for (grad, var) in ner_opt.compute_gradients(
             gender_loss,
@@ -322,10 +333,10 @@ class NER():
                 race_unit_protect = tf_normalize(race_grads[var])
 
                 grad -= tf.reduce_sum(grad * gender_unit_protect) * gender_unit_protect
-                grad -= tf.math.scalar_mul(gender_loss_weight, gender_grads[var])
+                grad -= tf.math.scalar_mul(protected_loss_weight, gender_grads[var])
 
                 grad -= tf.reduce_sum(grad * race_unit_protect) * race_unit_protect
-                grad -= tf.math.scalar_mul(race_loss_weight, race_grads[var])
+                grad -= tf.math.scalar_mul(protected_loss_weight, race_grads[var])
 
             ner_grads.append((grad, var))
 

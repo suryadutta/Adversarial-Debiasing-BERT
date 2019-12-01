@@ -97,7 +97,7 @@ def getNamedSentences(filename, sample, force_regenerate):
 
     save_filename = filename.replace('raw/CoNLL-2003','processed') + ".augmented_sents.pkl"
 
-    if (os.path.exists(save_filename)):
+    if (not force_regenerate and os.path.exists(save_filename)):
         with open(save_filename, 'rb') as savefile:
             augmented_sents = pickle.load(savefile)
 

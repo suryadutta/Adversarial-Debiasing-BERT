@@ -1,0 +1,6 @@
+pretrained: {'race': 0.0,
+ 'gender': 0.01015,
+ 'race_test_statistic': 0.3074387641815812,
+ 'gender_test_statistic': 0.09931555872098613,
+ 'race_std': 0.0439246619077045,
+ 'gender_std': 0.04341923520415302}
