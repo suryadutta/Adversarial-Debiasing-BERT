@@ -149,14 +149,7 @@ def custom_loss_protected(y_true, y_pred):
         )
 
 class BertLayer(tf.keras.layers.Layer):
-    """
-    Create BERT layer, following https://towardsdatascience.com/bert-in-keras-with-tensorflow-hub-76bcbc9417b
-    init:  initialize layer. Specify various parameters regarding output types and dimensions. Very important is
-           to set the number of trainable layers.
-    build: build the layer based on parameters
-    call:  call the BERT layer within a model
-    """
-    
+
     def __init__(
         self,
         n_fine_tune_layers=10,
@@ -226,7 +219,6 @@ class BertLayer(tf.keras.layers.Layer):
     def compute_output_shape(self, input_shape):
         return (None, 128, 768)
 
-
 class NER():
 
     def __init__(self, max_input_length, filename=None):
@@ -252,18 +244,18 @@ class NER():
 
         concatenate = tf.keras.layers.Concatenate(axis=-1)([in_nerLabels, reshape])
 
-        genderDense1 = tf.keras.layers.Dense(60, activation='relu', name='genderDense1')(concatenate)
+        genderDense1 = tf.keras.layers.Dense(30, activation='relu', name='genderDense1')(concatenate)
         genderDense1 = tf.keras.layers.Dropout(rate=0.1)(genderDense1)
 
-        genderDense2 = tf.keras.layers.Dense(60, activation='relu', name='genderDense2')(genderDense1)
+        genderDense2 = tf.keras.layers.Dense(30, activation='relu', name='genderDense2')(genderDense1)
         genderDense2 = tf.keras.layers.Dropout(rate=0.1)(genderDense2)
 
         genderPred = tf.keras.layers.Dense(6, activation='softmax', name='genderPred')(genderDense2)
 
-        raceDense1 = tf.keras.layers.Dense(60, activation='relu', name='raceDense1')(concatenate)
+        raceDense1 = tf.keras.layers.Dense(30, activation='relu', name='raceDense1')(concatenate)
         raceDense1 = tf.keras.layers.Dropout(rate=0.1)(raceDense1)
 
-        raceDense2 = tf.keras.layers.Dense(60, activation='relu', name='raceDense2')(raceDense1)
+        raceDense2 = tf.keras.layers.Dense(30, activation='relu', name='raceDense2')(raceDense1)
         raceDense2 = tf.keras.layers.Dropout(rate=0.1)(raceDense2)
 
         racePred = tf.keras.layers.Dense(6, activation='softmax', name='racePred')(raceDense2)
@@ -323,11 +315,11 @@ class NER():
 
         ner_grads = []
 
-        tf_normalize = lambda x: x / (tf.norm(x) + np.finfo(np.float32).tiny)
+        if debias:
 
-        for (grad, var) in ner_opt.compute_gradients(ner_loss, var_list=ner_vars):
+            tf_normalize = lambda x: x / (tf.norm(x) + np.finfo(np.float32).tiny)
 
-            if debias:
+            for (grad, var) in ner_opt.compute_gradients(ner_loss, var_list=ner_vars):
 
                 gender_unit_protect = tf_normalize(gender_grads[var])
                 race_unit_protect = tf_normalize(race_grads[var])
@@ -338,13 +330,17 @@ class NER():
                 grad -= tf.reduce_sum(grad * race_unit_protect) * race_unit_protect
                 grad -= tf.math.scalar_mul(protected_loss_weight, race_grads[var])
 
-            ner_grads.append((grad, var))
+                ner_grads.append((grad, var))
 
-        ner_min = ner_opt.apply_gradients(ner_grads, global_step=global_step)
+            ner_min = ner_opt.apply_gradients(ner_grads, global_step=global_step)
 
-        gender_min = gender_opt.minimize(gender_loss, var_list=[gender_vars], global_step=global_step)
+        else:
 
-        race_min = race_opt.minimize(race_loss, var_list=[race_vars], global_step=global_step)
+            ner_min = ner_opt.minimize(ner_loss, var_list=ner_vars, global_step=global_step)
+
+        gender_min = gender_opt.minimize(gender_loss, var_list=gender_vars, global_step=global_step)
+
+        race_min = race_opt.minimize(race_loss, var_list=race_vars, global_step=global_step)
 
         initialize_vars(sess)
 
@@ -503,6 +499,18 @@ class NER():
         df = pd.DataFrame(list(zip(names, races, genders, sentiment_values, sentiment_confidences, distances)), 
                   columns =['name', 'race', 'gender', 'sentiment', 'confidence', 'distance']) 
 
+
+        def getAddendPerName(data, name):
+
+            data_subset = data[data["name"]==name]
+            grouped = data_subset.groupby('sentiment')
+            get_weighted_avg = lambda g: np.average(g['distance'], weights=g['confidence'])
+            polarity_groupby = grouped.apply(get_weighted_avg)
+
+            return (polarity_groupby["POSITIVE"] - polarity_groupby["NEGATIVE"])
+
+
+
         def getScoreForNames(data, names):
     
             score_sum = 0
@@ -527,16 +535,31 @@ class NER():
 
         male_names = df[df["gender"]=="MALE"]["name"].unique()
 
-        def getTestStatisticForRace(data):
-            return getScoreForNames(data, afam_names) - getScoreForNames(data, european_names)
+        def getStatsForRace(data):
 
-        race_test_statistic = getTestStatisticForRace(df)
+            ## returns test statistic and effect size
 
+            afam_addends = [getAddendPerName(data, name) for name in afam_names]
+            european_addends = [getAddendPerName(data, name) for name in european_names]
 
-        def getTestStatisticForGender(data):
-            return getScoreForNames(data, female_names) - getScoreForNames(data, male_names)
+            test_statistic =  np.sum(afam_addends) - np.sum(european_addends)
+            effect_size = (np.mean(afam_addends) - np.mean(european_addends)) / np.std(afam_addends + european_addends)
 
-        gender_test_statistic = getTestStatisticForGender(df)
+            return test_statistic, effect_size
+
+        race_test_statistic, race_effect_size = getStatsForRace(df)
+
+        def getStatsForGender(data):
+
+            female_addends = [getAddendPerName(data, name) for name in female_names]
+            male_addends = [getAddendPerName(data, name) for name in male_names]
+
+            test_statistic =  np.sum(female_addends) - np.sum(male_addends)
+            effect_size = (np.mean(female_addends) - np.mean(male_addends)) / np.std(female_addends + male_addends)
+
+            return test_statistic, effect_size
+
+        gender_test_statistic, gender_effect_size = getStatsForGender(df)
 
         race_permutation_test_statistics = []
         gender_permutation_test_statistics = []
@@ -545,15 +568,13 @@ class NER():
         for i in tqdm(range(num_iterations)):
             shuffled_data["distance"] = shuffled_data["distance"].sample(frac=1).reset_index().drop("index", axis=1)
             
-            new_race_test_statistic = getTestStatisticForRace(shuffled_data)
+            new_race_test_statistic, new_race_effect_size = getStatsForRace(shuffled_data)
             race_permutation_test_statistics.append(new_race_test_statistic)
             
-            new_gender_test_statistic = getTestStatisticForGender(shuffled_data)
+            new_gender_test_statistic, new_gender_effect_size = getStatsForGender(shuffled_data)
             gender_permutation_test_statistics.append(new_gender_test_statistic)
-
         
         race_p = np.sum(np.abs(race_test_statistic) < np.abs(race_permutation_test_statistics))/(2*len(race_permutation_test_statistics))
-
         gender_p = np.sum(np.abs(gender_test_statistic) < np.abs(gender_permutation_test_statistics))/(2*len(gender_permutation_test_statistics))
 
         return {
@@ -562,5 +583,7 @@ class NER():
             "race_test_statistic": race_test_statistic,
             "gender_test_statistic": gender_test_statistic,
             "race_std": np.std(race_permutation_test_statistics),
-            "gender_std": np.std(gender_permutation_test_statistics)
+            "gender_std": np.std(gender_permutation_test_statistics),
+            "race_effect_size": race_effect_size,
+            "gender_effect_size": gender_effect_size
         }
