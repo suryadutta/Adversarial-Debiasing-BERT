@@ -6,3 +6,31 @@ pretrained: {'race': 0.0,
  'gender_std': 0.043073192178355056,
  'race_effect_size': 1.1654334591228719,
  'gender_effect_size': 0.37648367294553986}
+
+
+ trained: 
+ 
+ {'race': 0.0,
+ 'gender': 0.2807,
+ 'race_test_statistic': 0.3842757336007788,
+ 'gender_test_statistic': -0.05742955995490251,
+ 'race_std': 0.09622614605055416,
+ 'gender_std': 0.09672796008075966,
+ 'race_effect_size': 1.1134265250874718,
+ 'gender_effect_size': -0.16640029485785918}
+ 
+ acc_ner: 0.99; acc_ner_non_other: 0.98;  acc_gender: 0.50; acc_race: 0.50
+ 
+         tag  cat  occurences
+0    B-MISC    0         800
+1     I-LOC    1      328160
+2    I-MISC    2      139600
+3     I-ORG    3      237760
+4     I-PER    4      977800
+5         O    5     6661880
+6  [nerCLS]    6      397080
+7  [nerPAD]    7    39623065
+8  [nerSEP]    8      397080
+9    [nerX]    9     2063015
+
+trained with debiasing:

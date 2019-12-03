@@ -298,8 +298,8 @@ class NER():
         race_loss = custom_loss_protected(race_ph, y_pred["race"])
 
         ner_opt = tf.train.AdamOptimizer(2**-16)
-        gender_opt = tf.train.AdamOptimizer(2**-8)
-        race_opt = tf.train.AdamOptimizer(2**-8)
+        gender_opt = tf.train.AdamOptimizer(2**-3)
+        race_opt = tf.train.AdamOptimizer(2**-3)
 
         protected_loss_weight = 0.1
 
