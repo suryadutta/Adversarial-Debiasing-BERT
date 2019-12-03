@@ -1,6 +1,8 @@
 pretrained: {'race': 0.0,
- 'gender': 0.01015,
- 'race_test_statistic': 0.3074387641815812,
- 'gender_test_statistic': 0.09931555872098613,
- 'race_std': 0.0439246619077045,
- 'gender_std': 0.04341923520415302}
+ 'gender': 0.0098,
+ 'race_test_statistic': 0.30743876418158117,
+ 'gender_test_statistic': 0.09931555872098596,
+ 'race_std': 0.044022818923241315,
+ 'gender_std': 0.043073192178355056,
+ 'race_effect_size': 1.1654334591228719,
+ 'gender_effect_size': 0.37648367294553986}
