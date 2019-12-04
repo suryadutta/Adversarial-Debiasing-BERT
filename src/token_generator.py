@@ -23,7 +23,7 @@ def create_tokenizer_from_hub_module():
 
 tokenizer = create_tokenizer_from_hub_module()
 
-def addWord(word, pos, ner, gender, race):
+def addWord(word, pos, ner):
     """
     Convert a word into a word token and add supplied NER and POS labels. Note that the word can be  
     tokenized to two or more tokens. Correspondingly, we add - for now - custom 'X' tokens to the labels in order to 
@@ -46,10 +46,6 @@ def addWord(word, pos, ner, gender, race):
     addDict['wordToken'] = tokens
     addDict['posToken'] = [pos] + ['[posX]'] * (tokenLength - 1)
     addDict['nerToken'] = [ner] + ['[nerX]'] * (tokenLength - 1)
-
-    addDict['genderToken'] = [gender] + ['[genderX]'] * (tokenLength - 1)
-    addDict['raceToken'] = [race] + ['[raceX]'] * (tokenLength - 1)
-
     addDict['tokenLength'] = tokenLength
     
     return addDict
@@ -69,20 +65,22 @@ class TokenizedSentence:
 
         for index, word in enumerate(sentence.words):
 
-            addDict = addWord(word.txt, word.pos, word.named_entity_tag, sentence.gender, sentence.race)
+            addDict = addWord(word.txt, word.pos, word.named_entity_tag)
             
             sentenceTokens += addDict['wordToken']
             posTokens += addDict['posToken']
             nerTokens += addDict['nerToken']
-            genderTokens += addDict['genderToken']
-            raceTokens += addDict['raceToken']
 
             tokenLength = addDict['tokenLength']
             
-            if index == sentence.name_index:                
+            if index == sentence.name_index:     
+                raceTokens += [sentence.race] + ["[raceX]"]*(tokenLength-1)
+                genderTokens += [sentence.gender] + ["[genderX]"]*(tokenLength-1)      
                 nameMask += [1]*tokenLength
                 
             else:
+                raceTokens += ["[raceX]"]*tokenLength
+                genderTokens += ["[genderX]"]*tokenLength
                 nameMask += [0]*tokenLength
 
         sentenceLength = min(max_length -1, len(sentenceTokens))

@@ -135,18 +135,8 @@ def custom_loss_protected(y_true, y_pred):
     
     y_flat_pred_masked = tf.boolean_mask(y_flat_pred, mask) # mask the predictions
 
-    y_label_masked_inv = tf.where(
-        tf.equal(1,y_label_masked), 
-        tf.zeros_like(y_label_masked), 
-        tf.ones_like(y_label_masked)
-    )
+    return tf.reduce_mean(sparse_categorical_crossentropy(y_label_masked, y_flat_pred_masked,from_logits=False ))
 
-    #tf.math.abs(tf.math.subtract(y_flat_pred,1))
-    
-    return tf.reduce_mean(
-        sparse_categorical_crossentropy( y_label_masked, y_flat_pred_masked, from_logits=False ) + \
-        sparse_categorical_crossentropy( y_label_masked_inv, y_flat_pred_masked, from_logits=False )
-        )
 
 class BertLayer(tf.keras.layers.Layer):
 
@@ -244,21 +234,11 @@ class NER():
 
         concatenate = tf.keras.layers.Concatenate(axis=-1)([in_nerLabels, reshape])
 
-        genderDense1 = tf.keras.layers.Dense(30, activation='relu', name='genderDense1')(concatenate)
-        genderDense1 = tf.keras.layers.Dropout(rate=0.1)(genderDense1)
+        genderDense = tf.keras.layers.Dense(30, activation='relu', name='genderDense')(concatenate)
+        genderPred = tf.keras.layers.Dense(6, activation='softmax', name='genderPred')(genderDense)
 
-        genderDense2 = tf.keras.layers.Dense(30, activation='relu', name='genderDense2')(genderDense1)
-        genderDense2 = tf.keras.layers.Dropout(rate=0.1)(genderDense2)
-
-        genderPred = tf.keras.layers.Dense(6, activation='softmax', name='genderPred')(genderDense2)
-
-        raceDense1 = tf.keras.layers.Dense(30, activation='relu', name='raceDense1')(concatenate)
-        raceDense1 = tf.keras.layers.Dropout(rate=0.1)(raceDense1)
-
-        raceDense2 = tf.keras.layers.Dense(30, activation='relu', name='raceDense2')(raceDense1)
-        raceDense2 = tf.keras.layers.Dropout(rate=0.1)(raceDense2)
-
-        racePred = tf.keras.layers.Dense(6, activation='softmax', name='racePred')(raceDense2)
+        raceDense = tf.keras.layers.Dense(30, activation='relu', name='raceDense')(concatenate)
+        racePred = tf.keras.layers.Dense(6, activation='softmax', name='racePred')(raceDense)
         
         self.model = tf.keras.models.Model(inputs=[in_id, in_mask, in_segment, in_nerLabels], outputs={
             "ner": pred,
@@ -281,11 +261,7 @@ class NER():
         race_ph = tf.placeholder(tf.float32, shape=[batch_size, self.max_input_length])
         ner_onehot_ph = tf.placeholder(tf.float32, shape=[batch_size, self.max_input_length, 10])
 
-        # Setup optimizers with learning rates
         global_step = tf.Variable(0, trainable=False)
-        #starter_learning_rate = 0.001
-        #learning_rate = tf.train.exponential_decay(starter_learning_rate, global_step,
-        #                                            1000, 0.96, staircase=True)
 
         gender_vars = [var for var in tf.trainable_variables() if 'gender' in var.name]
         race_vars = [var for var in tf.trainable_variables() if 'race' in var.name]
@@ -298,24 +274,24 @@ class NER():
         race_loss = custom_loss_protected(race_ph, y_pred["race"])
 
         ner_opt = tf.train.AdamOptimizer(2**-16)
-        gender_opt = tf.train.AdamOptimizer(2**-3)
-        race_opt = tf.train.AdamOptimizer(2**-3)
-
-        protected_loss_weight = 0.1
-
-        gender_grads = {var: grad for (grad, var) in ner_opt.compute_gradients(
-            gender_loss,
-            var_list=ner_vars
-        )}
-
-        race_grads = {var: grad for (grad, var) in ner_opt.compute_gradients(
-            race_loss,
-            var_list=ner_vars
-        )}
-
-        ner_grads = []
+        gender_opt = tf.train.AdamOptimizer()
+        race_opt = tf.train.AdamOptimizer()
 
         if debias:
+
+            protected_loss_weight = 0.1
+
+            gender_grads = {var: grad for (grad, var) in ner_opt.compute_gradients(
+                gender_loss,
+                var_list=ner_vars
+            )}
+
+            race_grads = {var: grad for (grad, var) in ner_opt.compute_gradients(
+                race_loss,
+                var_list=ner_vars
+            )}
+
+            ner_grads = []
 
             tf_normalize = lambda x: x / (tf.norm(x) + np.finfo(np.float32).tiny)
 
@@ -399,7 +375,7 @@ class NER():
             race_true = val_data["raceLabels"]
 
             acc_race = custom_acc_protected(race_true, race_pred).eval(session=sess)            
-            print("acc_ner: %.2f; acc_ner_non_other: %.2f;  acc_gender: %.2f; acc_race: %.2f" % (acc_orig_tokens, acc_orig_non_other_tokens, acc_gender, acc_race))
+            print("val_acc_ner: %.2f; val_acc_ner_non_other: %.2f;  val_acc_gender: %.2f; val_acc_race: %.2f" % (acc_orig_tokens, acc_orig_non_other_tokens, acc_gender, acc_race))
 
     def score(self, data, batch_size=32):
 
@@ -508,24 +484,6 @@ class NER():
             polarity_groupby = grouped.apply(get_weighted_avg)
 
             return (polarity_groupby["POSITIVE"] - polarity_groupby["NEGATIVE"])
-
-
-
-        def getScoreForNames(data, names):
-    
-            score_sum = 0
-
-            for name in names:
-
-                data_subset = data[data["name"]==name]
-                
-                grouped = data_subset.groupby('sentiment')
-                get_weighted_avg = lambda g: np.average(g['distance'], weights=g['confidence'])
-                polarity_groupby = grouped.apply(get_weighted_avg)
-
-                score_sum += (polarity_groupby["POSITIVE"] - polarity_groupby["NEGATIVE"])
-
-            return score_sum
 
         afam_names = df[df["race"]=="AFRICAN-AMERICAN"]["name"].unique()
 
