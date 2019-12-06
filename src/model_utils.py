@@ -13,12 +13,6 @@ import matplotlib.pyplot as plt
 
 from tqdm.auto import tqdm
 
-def initialize_vars(sess):
-    sess.run(tf.local_variables_initializer())
-    sess.run(tf.global_variables_initializer())
-    sess.run(tf.tables_initializer())
-    K.set_session(sess)
-
 def custom_acc_orig_tokens(y_true, y_pred):
     """
     calculate loss dfunction filtering out also the newly inserted labels
@@ -207,17 +201,26 @@ class BertLayer(tf.keras.layers.Layer):
 
     
     def compute_output_shape(self, input_shape):
-        return (None, 128, 768)
+        return (input_shape[0], self.output_size)
 
 class NER():
 
-    def __init__(self, max_input_length, filename=None):
+    def __init__(self, max_input_length):
 
         self.max_input_length = max_input_length
 
-        if filename:
-            filename = "../models/"+filename
-            self.model = tf.keras.load(filename)
+        config = tf.ConfigProto()
+        config.gpu_options.allow_growth = True
+        self.sess = tf.Session(config=config)
+        self.initialized = False
+
+    def initialize_vars(self):
+        if not self.initialized:
+            self.sess.run(tf.local_variables_initializer())
+            self.sess.run(tf.global_variables_initializer())
+            self.sess.run(tf.tables_initializer())
+            K.set_session(self.sess)
+            self.initialized = True
 
     def generate(self, bert_train_layers):
     
@@ -248,7 +251,7 @@ class NER():
         
         self.model.summary()
         
-    def fit(self, sess, train_data, val_data, epochs, batch_size, debias):
+    def fit(self, train_data, val_data, epochs, batch_size, debias):
 
         num_train_samples = len(train_data["nerLabels"])
 
@@ -273,7 +276,7 @@ class NER():
         gender_loss = custom_loss_protected(gender_ph, y_pred["gender"])
         race_loss = custom_loss_protected(race_ph, y_pred["race"])
 
-        ner_opt = tf.train.AdamOptimizer(2**-16)
+        ner_opt = tf.train.AdamOptimizer(2**-17)
         gender_opt = tf.train.AdamOptimizer()
         race_opt = tf.train.AdamOptimizer()
 
@@ -318,7 +321,7 @@ class NER():
 
         race_min = race_opt.minimize(race_loss, var_list=race_vars, global_step=global_step)
 
-        initialize_vars(sess)
+        self.initialize_vars()
 
         epoch_pb = tqdm(range(1, epochs+1))
 
@@ -337,12 +340,12 @@ class NER():
                 batch_feed_dict = {ids_ph: train_data["inputs"][0][batch_ids], 
                                 masks_ph: train_data["inputs"][1][batch_ids],
                                 sentenceIds_ph: train_data["inputs"][2][batch_ids],
-                                ner_onehot_ph: np.array([np.eye(10)[i.reshape(-1)] for i in train_data["nerLabels"][batch_ids]]),
+                                ner_onehot_ph: train_data["inputs"][3][batch_ids],
                                 gender_ph: train_data["genderLabels"][batch_ids],
                                 race_ph: train_data["raceLabels"][batch_ids],
                                 ner_ph: train_data["nerLabels"][batch_ids]}
 
-                _, _, _, ner_loss_value, gender_loss_value, race_loss_value  = sess.run([
+                _, _, _, ner_loss_value, gender_loss_value, race_loss_value  = self.sess.run([
                     ner_min,
                     gender_min,
                     race_min,
@@ -356,32 +359,34 @@ class NER():
 
             inputs = val_data["inputs"] 
             
-            inputs.append(np.array([np.eye(10)[i.reshape(-1)] for i in train_data["nerLabels"]]))
-
             val_y_pred = self.model.predict(inputs, batch_size=32)
 
             ner_pred = val_y_pred[1]
             ner_true = val_data["nerLabels"]
 
-            acc_orig_tokens = custom_acc_orig_tokens(ner_true, ner_pred).eval(session=sess)
-            acc_orig_non_other_tokens = custom_acc_orig_non_other_tokens(ner_true, ner_pred).eval(session=sess)
+            acc_orig_tokens = custom_acc_orig_tokens(ner_true, ner_pred).eval(session=self.sess)
+            acc_orig_non_other_tokens = custom_acc_orig_non_other_tokens(ner_true, ner_pred).eval(session=self.sess)
 
             gender_pred = val_y_pred[0]
             gender_true = val_data["genderLabels"]
 
-            acc_gender = custom_acc_protected(gender_true, gender_pred).eval(session=sess)
+            acc_gender = custom_acc_protected(gender_true, gender_pred).eval(session=self.sess)
 
             race_pred = val_y_pred[2]
             race_true = val_data["raceLabels"]
 
-            acc_race = custom_acc_protected(race_true, race_pred).eval(session=sess)            
+            acc_race = custom_acc_protected(race_true, race_pred).eval(session=self.sess)            
             print("val_acc_ner: %.2f; val_acc_ner_non_other: %.2f;  val_acc_gender: %.2f; val_acc_race: %.2f" % (acc_orig_tokens, acc_orig_non_other_tokens, acc_gender, acc_race))
 
     def score(self, data, batch_size=32):
 
+        self.initialize_vars()
+
         y_pred = self.model.predict(data["inputs"], batch_size=batch_size)[1]
 
         y_true = data["nerLabels"]
+
+        print("acc_ner: %.2f; acc_ner_non_other: %.2f" % (custom_acc_orig_tokens(y_true, y_pred).eval(session=self.sess), (custom_acc_orig_non_other_tokens(y_true, y_pred).eval(session=self.sess))))
 
         predictions_flat = [pred for preds in np.argmax(y_pred, axis=2) for pred in preds]
         labels_flat = [label for labels in y_true for label in labels]
@@ -394,10 +399,6 @@ class NER():
                 clean_preds.append(pred)
                 clean_labels.append(label)
 
-        config = tf.ConfigProto()
-        config.gpu_options.allow_growth = True
-        sess = tf.InteractiveSession(config=config)
-
         cm = tf.math.confusion_matrix(
             clean_labels,
             clean_preds,
@@ -405,19 +406,12 @@ class NER():
             dtype=tf.dtypes.int32,
             name=None,
             weights=None
-        ).eval()
+        ).eval(session=self.sess)
 
         plt.imshow(cm[:-1,:-1], cmap='Greens')
 
-        sess.close()
-
         return cm
             
-    def save(self, filename):
-        filename = "../models/"+filename
-        self.model.save(filename)
-        print("Saved model to " + filename)
-
     def yieldBertEmbeddings(self, inputs):
 
         embeddingsModel = tf.keras.models.Model(
@@ -456,6 +450,8 @@ class NER():
         return np.array(distances)
 
     def getBiasedPValues(self, data, num_iterations=10000):
+
+        self.initialize_vars()
 
         distances = self.getCosineDistances(data["inputs"], data["nameMasks"])
 

@@ -9,18 +9,28 @@ pretrained: {'race': 0.0,
 
 
  trained: 
- 
- {'race': 0.0,
- 'gender': 0.2807,
- 'race_test_statistic': 0.3842757336007788,
- 'gender_test_statistic': -0.05742955995490251,
- 'race_std': 0.09622614605055416,
- 'gender_std': 0.09672796008075966,
- 'race_effect_size': 1.1134265250874718,
- 'gender_effect_size': -0.16640029485785918}
- 
- acc_ner: 0.99; acc_ner_non_other: 0.98;  acc_gender: 0.50; acc_race: 0.50
- 
+
+ {'race': 0.00015,
+ 'gender': 0.39505,
+ 'race_test_statistic': 0.3175214479607037,
+ 'gender_test_statistic': -0.023360273873383686,
+ 'race_std': 0.09062962079908965,
+ 'gender_std': 0.09102019940304566,
+ 'race_effect_size': 0.9229255301503857,
+ 'gender_effect_size': -0.06790027346977537}
+
+val_acc_ner: 0.99; val_acc_ner_non_other: 0.97;  val_acc_gender: 0.50; val_acc_race: 0.50
+
+acc_ner: 0.99; acc_ner_non_other: 0.95
+
+array([[     40,       0,      40,      80,       0,       0],
+       [      0,   51583,    1233,    2599,     181,     284],
+       [      0,    1050,   15463,     470,     191,     986],
+       [      0,    2465,     797,   41335,     663,    1780],
+       [      0,     238,       2,     375,  187873,     632],
+       [      0,     340,     747,    1006,     461, 1083006]],
+      dtype=int32)
+
          tag  cat  occurences
 0    B-MISC    0         800
 1     I-LOC    1      328160
@@ -33,4 +43,29 @@ pretrained: {'race': 0.0,
 8  [nerSEP]    8      397080
 9    [nerX]    9     2063015
 
-trained with debiasing:
+
+
+
+debiased: 
+
+acc_ner: 0.99; acc_ner_non_other: 0.95
+
+array([[     0,      0,     34,     60,      0,     34],
+       [     0,  41029,   1230,   1118,    149,    187],
+       [     0,    779,  11955,    395,    126,    875],
+       [     0,   2252,    782,  31653,    560,   1429],
+       [     0,    143,     78,    271, 147878,    732],
+       [     0,    185,    633,    799,    486, 848260]], dtype=int32)
+       
+val_acc_ner: 0.99; val_acc_ner_non_other: 0.96;  val_acc_gender: 0.50; val_acc_race: 0.50
+
+{'race': 0.06125,
+ 'gender': 0.3184,
+ 'race_test_statistic': 0.1079299717180695,
+ 'gender_test_statistic': -0.032621769241430565,
+ 'race_std': 0.06937372370686934,
+ 'gender_std': 0.06933698328805071,
+ 'race_effect_size': 0.37930828509027725,
+ 'gender_effect_size': -0.11464570175094553}
+
+

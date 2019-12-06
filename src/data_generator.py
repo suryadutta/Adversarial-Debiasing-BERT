@@ -169,10 +169,13 @@ def GetData(max_length, sample=None, force_regenerate=None):
     genderLabels, \
     nameMasks = token_generator.getTokensAndLabelsFromSents(all_sents, max_length)
 
+    nerLabelsOneHot = [np.eye(10)[i.reshape(-1)] for i in nerLabels]
+
     sentenceIDs_train = np.array(sentenceIDs[train_data_start:train_data_end])
     masks_train = np.array(masks[train_data_start:train_data_end])
     sequenceIDs_train = np.array(sequenceIDs[train_data_start:train_data_end])
-    inputs_train = [sentenceIDs_train, masks_train, sequenceIDs_train]
+    nerLabelsOneHot_train = np.array(nerLabelsOneHot[train_data_start:train_data_end])
+    inputs_train = [sentenceIDs_train, masks_train, sequenceIDs_train, nerLabelsOneHot_train]
     nerLabels_train = nerLabels[train_data_start:train_data_end]
     genderLabels_train = genderLabels[train_data_start:train_data_end]
     raceLabels_train = raceLabels[train_data_start:train_data_end]
@@ -181,7 +184,8 @@ def GetData(max_length, sample=None, force_regenerate=None):
     sentenceIDs_val = np.array(sentenceIDs[val_data_start:val_data_end])
     masks_val = np.array(masks[val_data_start:val_data_end])
     sequenceIDs_val = np.array(sequenceIDs[val_data_start:val_data_end])
-    inputs_val = [sentenceIDs_val, masks_val, sequenceIDs_val]
+    nerLabelsOneHot_val = np.array(nerLabelsOneHot[val_data_start:val_data_end])
+    inputs_val = [sentenceIDs_val, masks_val, sequenceIDs_val, nerLabelsOneHot_val]
     nerLabels_val = nerLabels[val_data_start:val_data_end]
     genderLabels_val = genderLabels[val_data_start:val_data_end]
     raceLabels_val = raceLabels[val_data_start:val_data_end]
@@ -190,7 +194,8 @@ def GetData(max_length, sample=None, force_regenerate=None):
     sentenceIDs_test = np.array(sentenceIDs[test_data_start:test_data_end])
     masks_test = np.array(masks[test_data_start:test_data_end])
     sequenceIDs_test = np.array(sequenceIDs[test_data_start:test_data_end])
-    inputs_test = [sentenceIDs_test, masks_test, sequenceIDs_test]
+    nerLabelsOneHot_test = np.array(nerLabelsOneHot[test_data_start:test_data_end])
+    inputs_test = [sentenceIDs_test, masks_test, sequenceIDs_test, nerLabelsOneHot_test]
     nerLabels_test = nerLabels[test_data_start:test_data_end]
     genderLabels_test = genderLabels[test_data_start:test_data_end]
     raceLabels_test = raceLabels[test_data_start:test_data_end]
