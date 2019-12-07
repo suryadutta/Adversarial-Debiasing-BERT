@@ -237,11 +237,21 @@ class NER():
 
         concatenate = tf.keras.layers.Concatenate(axis=-1)([in_nerLabels, reshape])
 
-        genderDense = tf.keras.layers.Dense(30, activation='relu', name='genderDense')(concatenate)
-        genderPred = tf.keras.layers.Dense(6, activation='softmax', name='genderPred')(genderDense)
+        genderDense1 = tf.keras.layers.Dense(30, activation='relu', name='genderDense1')(concatenate)
+        genderDense1 = tf.keras.layers.Dropout(rate=0.1)(genderDense1)
 
-        raceDense = tf.keras.layers.Dense(30, activation='relu', name='raceDense')(concatenate)
-        racePred = tf.keras.layers.Dense(6, activation='softmax', name='racePred')(raceDense)
+        genderDense2 = tf.keras.layers.Dense(30, activation='relu', name='genderDense2')(genderDense1)
+        genderDense2 = tf.keras.layers.Dropout(rate=0.1)(genderDense2)
+
+        genderPred = tf.keras.layers.Dense(6, activation='softmax', name='genderPred')(genderDense2)
+
+        raceDense1 = tf.keras.layers.Dense(30, activation='relu', name='raceDense1')(concatenate)
+        raceDense1 = tf.keras.layers.Dropout(rate=0.1)(raceDense1)
+
+        raceDense2 = tf.keras.layers.Dense(30, activation='relu', name='raceDense2')(raceDense1)
+        raceDense2 = tf.keras.layers.Dropout(rate=0.1)(raceDense2)
+
+        racePred = tf.keras.layers.Dense(6, activation='softmax', name='racePred')(raceDense2)
         
         self.model = tf.keras.models.Model(inputs=[in_id, in_mask, in_segment, in_nerLabels], outputs={
             "ner": pred,
