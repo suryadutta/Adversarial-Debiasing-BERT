@@ -261,7 +261,9 @@ class NER():
         
         self.model.summary()
         
-    def fit(self, train_data, val_data, epochs, batch_size, debias):
+    def fit(self, train_data, val_data, epochs, batch_size, debias, 
+            pred_learning_rate = 2**-17, protect_learning_rate = 1**-3,
+            alpha=0.1, beta=0.1):
 
         num_train_samples = len(train_data["nerLabels"])
 
@@ -286,13 +288,11 @@ class NER():
         gender_loss = custom_loss_protected(gender_ph, y_pred["gender"])
         race_loss = custom_loss_protected(race_ph, y_pred["race"])
 
-        ner_opt = tf.train.AdamOptimizer(2**-17)
-        gender_opt = tf.train.AdamOptimizer()
-        race_opt = tf.train.AdamOptimizer()
+        ner_opt = tf.train.AdamOptimizer(pred_learning_rate)
+        gender_opt = tf.train.AdamOptimizer(protect_learning_rate)
+        race_opt = tf.train.AdamOptimizer(protect_learning_rate)
 
         if debias:
-
-            protected_loss_weight = 0.1
 
             gender_grads = {var: grad for (grad, var) in ner_opt.compute_gradients(
                 gender_loss,
@@ -314,10 +314,10 @@ class NER():
                 race_unit_protect = tf_normalize(race_grads[var])
 
                 grad -= tf.reduce_sum(grad * gender_unit_protect) * gender_unit_protect
-                grad -= tf.math.scalar_mul(protected_loss_weight, gender_grads[var])
+                grad -= tf.math.scalar_mul(alpha, gender_grads[var])
 
                 grad -= tf.reduce_sum(grad * race_unit_protect) * race_unit_protect
-                grad -= tf.math.scalar_mul(protected_loss_weight, race_grads[var])
+                grad -= tf.math.scalar_mul(beta, race_grads[var])
 
                 ner_grads.append((grad, var))
 
